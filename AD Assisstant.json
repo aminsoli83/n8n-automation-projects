@@ -1,0 +1,717 @@
+{
+  "name": "Agent copy 2",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body.message }}",
+        "options": {
+          "systemMessage": "=You are the Active Directory assistant of the GIG IT team (domain gig.holdings). You answer questions about users, computers and groups by calling your tools. Never guess AD data: every name, number, date or status in your answer must come from a tool result in this conversation.\n\nLANGUAGE (most important rule)\n- If the question contains Persian (Farsi) text, write the WHOLE answer in Persian: sentences, table headers and labels.\n- If the question is in English, answer in English.\n- Tool results are always in English; translate their meaning, but keep usernames, computer names, emails, OU and group names exactly as in AD (Latin letters).\n\nTOOLS\n- ad_lookup(action, q) for single objects:\n  find_user      q = name in Latin or Persian, username, email or employee number. Returns candidates.\n  user           q = one user. Details: employee number/ID, title, department, manager, enabled, locked_out,\n                 password last set / expires, last logon, groups.\n  user_groups    q = one user. Direct and nested groups.\n  user_computers q = one user. The user's computers with IP.\n  find_computer  q = computer name or part of it.\n  computer       q = one computer. Details, owner, IP, last logon, groups.\n  find_group     q = group name or part of it.\n  group          q = one group. Type, scope, members.\n  find_ou        q = OU name. Returns the full DN of each matching OU.\n- count_ad_objects: \"how many\" questions.\n- list_ou_users / list_ou_computers: the users or computers in an OU.\n- find_stale_computers, find_locked_users, find_expiring_passwords (use 10 days if no number is given).\n- get_group_members: all members of a group.\n- get_applied_gpos(user, computer): which Group Policies apply and why others do not.\n\nHOW TO WORK\n- Pass names to ad_lookup exactly as the person wrote them, also Persian names. Do not translate them yourself.\n- If a result has \"candidates\" or several users, show them in a short table (name, username, department, OU) and ask which one is meant.\n- If a result has \"error\" or \"note\", tell the person what it says.\n- Most tickets are about the OUs GIG and GSC (OU=GIG,OU=GIG-Holdings,DC=gig,DC=holdings and OU=GSC,OU=GIG-Holdings,DC=gig,DC=holdings).\n- Use one tool call when one is enough. Do not repeat a call whose result is already in this conversation.\n- For GPO questions call get_applied_gpos. Show computer and user policies as tables in precedence order, then the GPOs that do not apply with their reason. End with: this is the expected result from AD; run \"gpresult /h report.html\" on the computer for the real result.\n\nAD CHANGES\nYou never change AD yourself. The changes you can propose: add or remove a user to/from a group, disable or enable a user or computer, move a user or computer to another OU. Anything else (passwords, unlock, create, delete, rename): say it cannot be done here.\n- Only when the person asks for a change in their latest message.\n- First look up every object with ad_lookup (user, computer, group; find_ou for the target OU) so the names are exact. If a name matches several objects or none, ask. If nothing needs to change, say so.\n- Then write one short sentence of what will change and end the answer with exactly this block (exact usernames; computers without $; target_ou = the full dn from find_ou):\n```ad-change\n{\"changes\":[{\"action\":\"add\",\"user\":\"<user>\",\"group\":\"<group>\"}]}\n```\n  Other entries: {\"action\":\"remove\",\"user\":\"<user>\",\"group\":\"<group>\"}\n                 {\"action\":\"disable\",\"object\":\"<name>\",\"type\":\"user\"}   (type \"computer\" for a computer)\n                 {\"action\":\"enable\",\"object\":\"<name>\",\"type\":\"user\"}\n                 {\"action\":\"move\",\"object\":\"<name>\",\"type\":\"user\",\"target_ou\":\"<OU dn>\"}\n- Do not say the change is done and do not ask \"shall I proceed?\". The page shows Yes/Cancel and reports the result (\"Result of the confirmed change\").\n- For a leaver (offboarding), do not propose changes: tell them to use the \"Offboard a user\" button. It backs up the mailbox first when automatic backup is set up; otherwise back the mailbox up by hand before starting.\n\nANSWER STYLE\n- Start with the direct answer; key name or number in bold. Keep it short.\n- Use a markdown table for lists (at most 20 rows, say the total).\n- For follow-up questions, reuse data from earlier answers and say \"from the earlier result\".\n\nReminder: answer in the language of the latest question (Persian question = Persian answer).\n\nEarlier messages in this conversation: {{ JSON.stringify($json.body.history) }}\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        864,
+        -64
+      ],
+      "id": "088860b1-d142-4ec8-8dcd-c7c593c7f57a",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.sessionId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        368,
+        176
+      ],
+      "id": "736e5753-2366-48fb-ab31-d597a2663b98",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "description": "Finds computers that have not logged on for a number of days. Returns counts, breakdown by sub-OU and OS, and the oldest examples.\ndays: inactivity threshold (default 90). ou: optional, same rules as count_ad_objects.",
+        "workflowId": {
+          "__rl": true,
+          "value": "LuNCkO0YhZF7OHOR",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/LuNCkO0YhZF7OHOR",
+          "cachedResultName": "AD Stale Computers"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "days": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('days', ``, 'number') }}",
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "days",
+              "displayName": "days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        176
+      ],
+      "id": "b557c152-4b58-4b7b-acb9-ed2b0a9a90e3",
+      "name": "find_stale_computers"
+    },
+    {
+      "parameters": {
+        "description": "Lists user accounts that are locked out right now, with lockout time and department.\nou: optional, same rules as count_ad_objects.",
+        "workflowId": {
+          "__rl": true,
+          "value": "vnoI98tBFZYM2X19",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/vnoI98tBFZYM2X19",
+          "cachedResultName": "AD Locked Users"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "ou"
+          ],
+          "schema": [
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        624,
+        176
+      ],
+      "id": "04daa727-5181-42f8-a3b5-0c71d4f6cea4",
+      "name": "find_locked_users"
+    },
+    {
+      "parameters": {
+        "description": "Lists the user members of an AD group, including members of nested groups, with enabled/disabled counts and a breakdown by department.\ngroup: the group's exact name (cn), e.g. \"Domain Admins\".",
+        "workflowId": {
+          "__rl": true,
+          "value": "25FLDquEq21ov5U3",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/25FLDquEq21ov5U3",
+          "cachedResultName": "AD Group Members"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "group": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('group', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "group"
+          ],
+          "schema": [
+            {
+              "id": "group",
+              "displayName": "group",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        176
+      ],
+      "id": "6bcfb086-5d57-49e2-aca5-c44a8cb850eb",
+      "name": "get_group_members"
+    },
+    {
+      "parameters": {
+        "description": "   Returns total, enabled and disabled counts plus a breakdown by sub-OU. Use for ANY \"how many\" question.\n   object_type: computer, user, or group.\n   ou: optional. Empty = whole domain. Top-level OU: just its name (e.g. GIG-Holdings). Nested OU: full DN.",
+        "workflowId": {
+          "__rl": true,
+          "value": "9hzJEo7S3N2j7iRd",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/9hzJEo7S3N2j7iRd",
+          "cachedResultName": "AD Count"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "object_type": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('object_type', ``, 'string') }}",
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "object_type"
+          ],
+          "schema": [
+            {
+              "id": "object_type",
+              "displayName": "object_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        176
+      ],
+      "id": "c90099bf-63fb-432d-8a61-5142dfa387a6",
+      "name": "count_ad_objects"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ad-agent-local",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -64
+      ],
+      "id": "9bfeee79-31e2-4996-95bc-26a9928413bd",
+      "name": "Webhook",
+      "webhookId": "3aa0db87-1142-4651-b743-1db9518478b0",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EJPDQk53nzTgTsKs",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"reply\": $json.output } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1840,
+        -64
+      ],
+      "id": "1a4d1630-2a87-4cca-a44a-b694a66b8b42",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "description": "     Lists the users in an OU: counts, breakdown by sub-OU, and each user's name, username, employee number/ID, title and department.\n     ou: the OU's name (e.g. \"Audit\") or its full DN. The tool finds the OU by name.\n     direct_only: true to list only users directly in the OU; false (default) to include sub-OUs.\n     If the tool returns candidates, show them to the user and ask which OU they mean.",
+        "workflowId": {
+          "__rl": true,
+          "value": "GCN2PEDo2iMaXYxt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/GCN2PEDo2iMaXYxt",
+          "cachedResultName": "AD OU Users"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "direct_only": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('direct_only', ``, 'boolean') }}",
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "direct_only",
+              "displayName": "direct_only",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1008,
+        176
+      ],
+      "id": "ff481884-35ba-4336-a308-221e3b9a3a4b",
+      "name": "list_ou_users"
+    },
+    {
+      "parameters": {
+        "description": "     Lists the computer accounts in an OU: counts, breakdown by sub-OU and OS, and each computer's name, employee number, OS, last logon and status.\n     ou: the OU's name (e.g. \"FMR-Computers\") or its full DN. The tool finds the OU by name.\n     direct_only: true to list only computers directly in the OU; false (default) to include sub-OUs.\n     If the tool returns candidates, show them to the user and ask which OU they mean.",
+        "workflowId": {
+          "__rl": true,
+          "value": "H1DwPtn2J6AJW7rl",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/H1DwPtn2J6AJW7rl",
+          "cachedResultName": "AD OU Computers"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "direct_only": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('direct_only', ``, 'boolean') }}",
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "direct_only",
+              "displayName": "direct_only",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1136,
+        176
+      ],
+      "id": "2eae7a27-b999-4087-aa07-9b56c7c12d9c",
+      "name": "Call 'AD OU Computers'"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Returns the IP address(es) registered in DNS for one or more computers.\nnames: one or more computer names separated by commas, e.g. GIG001L11096,FMR012P1031185 (max 50).\nstatus \"not_found\" means the computer has no DNS record.",
+        "url": "http://172.30.0.44:8053/lookup",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "names",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1264,
+        176
+      ],
+      "id": "37c35915-855a-428c-b3cf-b889c98ef852",
+      "name": "get_computer_ip"
+    },
+    {
+      "parameters": {
+        "description": "     Lists enabled users whose password will expire within the next N days, with expiry date and days left. Also returns how many passwords have already expired.\n     days: the look-ahead window in days (default 10).\n     ou: optional. Empty = whole domain. Otherwise the OU's name or full DN.",
+        "workflowId": {
+          "__rl": true,
+          "value": "NpsSxeFeeIa1vSTl",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NpsSxeFeeIa1vSTl",
+          "cachedResultName": "AD Password Expiry"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "days": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('days', ``, 'number') }}",
+            "ou": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ou', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "days",
+              "displayName": "days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "ou",
+              "displayName": "ou",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        176
+      ],
+      "id": "4541e5d4-23b9-4a98-bce4-880fd46aebbe",
+      "name": "find_expiring_passwords"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Works out which Group Policy Objects apply to a user and/or a computer, and why other GPOs do not. Give user (logon name) and/or computer (computer name).",
+        "url": "http://172.30.0.44:8054/gpo",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "user",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', ``, 'string') }}"
+            },
+            {
+              "name": "computer",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters1_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "4a9da6e793cf69f20dcf65b6245e8fa4"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1520,
+        176
+      ],
+      "id": "fabd13ab-26b0-40e1-8d9c-95f84eb554bf",
+      "name": "get_applied_gpos"
+    },
+    {
+      "parameters": {
+        "model": "qwen3.5:9b",
+        "options": {
+          "temperature": 0.2,
+          "keepAlive": "30m",
+          "numCtx": 16384
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        240,
+        176
+      ],
+      "id": "d50e2016-549b-4863-adac-67fd025b2a65",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "5o6FBozXYLbVPagz",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Read-only Active Directory lookups for users, computers, groups and OUs.",
+        "url": "http://172.30.0.44:8054/ad",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "={{ $fromAI('action', 'One of: find_user, user, user_groups, user_computers, find_computer, computer, find_group, group, find_ou', 'string') }}"
+            },
+            {
+              "name": "q",
+              "value": "={{ $fromAI('q', 'The name, username, computer, group or OU exactly as the person wrote it', 'string') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "4a9da6e793cf69f20dcf65b6245e8fa4"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1728,
+        208
+      ],
+      "id": "4e1cbc4a-b0ec-4e61-8de8-a4526b7ffb37",
+      "name": "ad_lookup"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_stale_computers": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_locked_users": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_group_members": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "count_ad_objects": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "list_ou_users": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'AD OU Computers'": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_computer_ip": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_expiring_passwords": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_applied_gpos": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ad_lookup": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1d2fdb1e-9745-4aac-8874-bd7079cba7d7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62b4af13d57c02270f731aff8372d92f7079a8751fcb7d1decbdce07eff0b752"
+  },
+  "nodeGroups": [],
+  "id": "rpBak4TggcjCYp9R",
+  "tags": []
+}
