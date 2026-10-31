@@ -123,6 +123,3 @@ n8n · Ollama (Qwen 3.5 9B) · Python (stdlib HTTP server, raw LDAP v3 over TLS)
 - Exported workflows in this repository contain **no credentials**; n8n stores them separately. Hostnames, IPs and domain names have been replaced with placeholders.
 - The model can't change AD on its own: every change needs a person to approve it, is checked against protection rules, and is written to the audit log.
 
-## License
-
-MIT
